@@ -50,19 +50,19 @@
         <h1 class="mb-4">IoT Data Viewer</h1>
         
         <div class="row mb-4">
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label for="deviceSelect" class="form-label">Device</label>
                 <select id="deviceSelect" class="form-select">
                     <option value="">All Devices</option>
                 </select>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label for="sensorSelect" class="form-label">Sensor Type</label>
                 <select id="sensorSelect" class="form-select">
                     <option value="">All Sensors</option>
                 </select>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label for="timeRange" class="form-label">Time Range</label>
                 <select id="timeRange" class="form-select">
                     <option value="1">Last Hour</option>
@@ -71,7 +71,7 @@
                     <option value="168">Last Week</option>
                 </select>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label for="granularity" class="form-label">Time Granularity</label>
                 <select id="granularity" class="form-select">
                     <option value="raw">Raw Data</option>
@@ -81,10 +81,6 @@
                     <option value="30min">30 Minutes</option>
                     <option value="1hour">1 Hour</option>
                 </select>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">&nbsp;</label>
-                <button id="refreshBtn" class="btn btn-primary form-control">Refresh Data</button>
             </div>
         </div>
         
@@ -180,8 +176,7 @@
             fetchDevices();
             fetchSensorTypes();
             
-            // Set up event listeners
-            document.getElementById('refreshBtn').addEventListener('click', refreshData);
+            // Set up event listeners for auto-refresh
             document.getElementById('deviceSelect').addEventListener('change', () => {
                 fetchSensorTypes();  // Refresh sensor types when device changes
                 refreshData();
@@ -554,6 +549,9 @@
             // Get unique list of devices from stats
             const devices = [...new Set(stats.map(stat => stat.device_id))];
             
+            // Get the selected sensor type from dropdown
+            const selectedSensorType = document.getElementById('sensorSelect').value;
+            
             // Fetch all possible sensor types from the API
             let allSensorTypes = [];
             try {
@@ -566,6 +564,11 @@
                 allSensorTypes = [...new Set(stats.map(stat => stat.sensor_type))].sort();
             }
             
+            // Filter sensor types based on dropdown selection
+            const sensorTypesToShow = selectedSensorType 
+                ? [selectedSensorType] 
+                : allSensorTypes;
+            
             // Create a lookup map for quick access to stats
             const statsMap = {};
             stats.forEach(stat => {
@@ -576,7 +579,7 @@
             });
             
             // For each sensor type, create cards for all devices
-            allSensorTypes.forEach(sensorType => {
+            sensorTypesToShow.forEach(sensorType => {
                 devices.forEach(deviceId => {
                     const stat = statsMap[deviceId]?.[sensorType];
                     const card = document.createElement('div');
