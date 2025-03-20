@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Data Viewer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.2.0/dist/chartjs-adapter-luxon.min.js"></script>
+    <style>
+        body {
+            padding-top: 20px;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-bottom: 0;
+        }
+        .stats-container {
+            height: 300px;
+            overflow-y: auto;
+            padding-right: 5px;
+        }
+        .stats-card {
+            margin-bottom: 10px;
+        }
+        .stats-card:last-child {
+            margin-bottom: 0;
+        }
+        /* Scrollbar styling */
+        .stats-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .stats-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .stats-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .stats-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">IoT Data Viewer</h1>
+        
+        <div class="row mb-4">
+            <div class="col-md-2">
+                <label for="deviceSelect" class="form-label">Device</label>
+                <select id="deviceSelect" class="form-select">
+                    <option value="">All Devices</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="sensorSelect" class="form-label">Sensor Type</label>
+                <select id="sensorSelect" class="form-select">
+                    <option value="">All Sensors</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="timeRange" class="form-label">Time Range</label>
+                <select id="timeRange" class="form-select">
+                    <option value="1">Last Hour</option>
+                    <option value="6">Last 6 Hours</option>
+                    <option value="24">Last 24 Hours</option>
+                    <option value="168">Last Week</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="granularity" class="form-label">Time Granularity</label>
+                <select id="granularity" class="form-select">
+                    <option value="raw">Raw Data</option>
+                    <option value="1min">1 Minute</option>
+                    <option value="5min">5 Minutes</option>
+                    <option value="15min">15 Minutes</option>
+                    <option value="30min">30 Minutes</option>
+                    <option value="1hour">1 Hour</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button id="refreshBtn" class="btn btn-primary form-control">Refresh Data</button>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title">Sensor Readings</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="sensorChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="card-title">Statistics</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="stats-container" id="statsContainer">
+                            <!-- Stats cards will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title">Recent Data</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Device ID</th>
+                                        <th>Sensor Type</th>
+                                        <th>Value</th>
+                                        <th>Unit</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dataTable">
+                                    <!-- Data rows will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">Debug Information</h5>
+                        <button class="btn btn-sm btn-outline-secondary" id="toggleDebugBtn">Show/Hide</button>
+                    </div>
+                    <div class="card-body" id="debugInfo" style="display: none;">
+                        <pre id="debugOutput">No debug information available</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let sensorChart = null;
+        
+        // Auto-refresh functionality
+        let autoRefreshInterval = null;
+        
+        function disableAutoRefresh() {
+            // Remove the auto-refresh code
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                console.log('Auto-refresh disabled');
+            }
+        }
+        
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load devices and sensor types
+            fetchDevices();
+            fetchSensorTypes();
+            
+            // Set up event listeners
+            document.getElementById('refreshBtn').addEventListener('click', refreshData);
+            document.getElementById('deviceSelect').addEventListener('change', () => {
+                fetchSensorTypes();  // Refresh sensor types when device changes
+                refreshData();
+            });
+            document.getElementById('sensorSelect').addEventListener('change', refreshData);
+            document.getElementById('timeRange').addEventListener('change', refreshData);
+            document.getElementById('granularity').addEventListener('change', refreshData);
+            
+            // Initial data load
+            refreshData();
+            
+            // Disable auto-refresh
+            disableAutoRefresh();
+        });
+        
+        // Fetch list of devices
+        function fetchDevices() {
+            fetch('/api/devices')
+                .then(response => response.json())
+                .then(devices => {
+                    // Sort devices alphabetically
+                    devices.sort((a, b) => a.localeCompare(b));
+                    
+                    const select = document.getElementById('deviceSelect');
+                    // Clear existing options except the "All Devices" option
+                    select.innerHTML = '<option value="">All Devices</option>';
+                    
+                    devices.forEach(device => {
+                        const option = document.createElement('option');
+                        option.value = device;
+                        option.textContent = device;
+                        select.appendChild(option);
+                    });
+                });
+        }
+        
+        // Fetch list of sensor types
+        function fetchSensorTypes() {
+            const deviceId = document.getElementById('deviceSelect').value;
+            const params = new URLSearchParams();
+            if (deviceId) {
+                params.append('device_id', deviceId);
+            }
+            
+            fetch('/api/sensor_types?' + params.toString())
+                .then(response => response.json())
+                .then(sensorTypes => {
+                    // Sort sensor types alphabetically
+                    sensorTypes.sort((a, b) => a.localeCompare(b));
+                    
+                    const select = document.getElementById('sensorSelect');
+                    // Clear existing options except the "All Sensors" option
+                    select.innerHTML = '<option value="">All Sensors</option>';
+                    
+                    sensorTypes.forEach(type => {
+                        const option = document.createElement('option');
+                        option.value = type;
+                        option.textContent = type;
+                        select.appendChild(option);
+                    });
+                });
+        }
+        
+        // Refresh all data
+        function refreshData() {
+            const deviceId = document.getElementById('deviceSelect').value;
+            const sensorType = document.getElementById('sensorSelect').value;
+            const hours = document.getElementById('timeRange').value;
+            const granularity = document.getElementById('granularity').value;
+            
+            // Build query parameters
+            let params = new URLSearchParams();
+            params.append('hours', hours);
+            if (deviceId) params.append('device_id', deviceId);
+            if (sensorType) params.append('sensor_type', sensorType);
+            
+            // Fetch and display data
+            fetchAndDisplayData(params, granularity);
+            fetchAndDisplayStats(params);
+        }
+        
+        // Fetch and display sensor data
+        function fetchAndDisplayData(params, granularity = 'raw') {
+            console.log('Fetching data with params:', params.toString(), 'granularity:', granularity);
+            
+            // Add granularity to params
+            params.append('granularity', granularity);
+            
+            // Use the new aggregated_data endpoint
+            fetch('/api/aggregated_data?' + params.toString())
+                .then(response => {
+                    console.log('Response status:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Received data:', data);
+                    console.log('Data length:', data.length);
+                    
+                    // Check if we have any data
+                    if (data.length === 0) {
+                        console.warn('No data received from API');
+                        document.getElementById('debugOutput').textContent = 'No data received from API. Make sure your IoT devices are running and sending data.';
+                    }
+                    
+                    // Since data is already aggregated by the backend, we can simplify the chart update
+                    updateChartWithAggregatedData(data);
+                    updateTable(data);
+                    updateDebugInfo(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    document.getElementById('debugOutput').textContent = 'Error: ' + error.message;
+                });
+        }
+        
+        // Fetch and display statistics
+        async function fetchAndDisplayStats(params) {
+            try {
+                const response = await fetch('/api/stats?' + params.toString());
+                const stats = await response.json();
+                await updateStats(stats);
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+            }
+        }
+        
+        // New function to update chart with pre-aggregated data
+        function updateChartWithAggregatedData(data) {
+            // Get the chart container and completely reset it
+            const chartContainer = document.querySelector('.chart-container');
+            chartContainer.innerHTML = '';
+            
+            // Create a new canvas element with explicit dimensions
+            const canvas = document.createElement('canvas');
+            canvas.id = 'sensorChart';
+            canvas.width = chartContainer.clientWidth;
+            canvas.height = chartContainer.clientHeight;
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            chartContainer.appendChild(canvas);
+            
+            // Properly destroy any existing chart
+            if (sensorChart) {
+                sensorChart.destroy();
+                sensorChart = null;
+            }
+            
+            // Get the new canvas context
+            const ctx = canvas.getContext('2d');
+            
+            // Check if we have data to display
+            if (data.length === 0) {
+                // No data to display
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data available for the selected filters', canvas.width / 2, canvas.height / 2);
+                console.log('No data available to chart');
+                return;
+            }
+            
+            // Group data by sensor type and device
+            const groupedData = {};
+            
+            data.forEach(item => {
+                const key = `${item.device_id}-${item.sensor_type}`;
+                if (!groupedData[key]) {
+                    groupedData[key] = {
+                        label: `${item.device_id} - ${item.sensor_type} (${item.unit})`,
+                        data: [],
+                        borderColor: getRandomColor(),
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        fill: false,
+                        tension: 0.1
+                    };
+                }
+                
+                groupedData[key].data.push({
+                    x: new Date(item.timestamp),
+                    y: parseFloat(item.value)
+                });
+            });
+            
+            // Sort data points by timestamp for each dataset
+            Object.values(groupedData).forEach(dataset => {
+                dataset.data.sort((a, b) => a.x - b.x);
+            });
+            
+            // Prepare datasets for Chart.js
+            const datasets = Object.values(groupedData);
+            
+            console.log('Charting pre-aggregated data:', datasets);
+            
+            // Make sure we have data to chart
+            if (datasets.length === 0 || datasets.some(d => d.data.length === 0)) {
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data available for the selected filters', canvas.width / 2, canvas.height / 2);
+                console.log('No valid datasets to chart');
+                return;
+            }
+            
+            // Create a new chart with a completely new canvas
+            try {
+                // Wait for the next frame to ensure the canvas is ready
+                window.requestAnimationFrame(() => {
+                    sensorChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            datasets: datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    type: 'time',
+                                    time: {
+                                        unit: getTimeUnit(document.getElementById('granularity').value),
+                                        displayFormats: {
+                                            minute: 'HH:mm',
+                                            hour: 'HH:mm',
+                                            day: 'MMM D'
+                                        }
+                                    },
+                                    title: {
+                                        display: true,
+                                        text: 'Time'
+                                    }
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: 'Value'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        title: function(tooltipItems) {
+                                            return new Date(tooltipItems[0].parsed.x).toLocaleString();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error('Error creating chart:', error);
+                document.getElementById('debugOutput').textContent = 'Chart error: ' + error.message;
+            }
+        }
+        
+        // Function to aggregate data by time granularity
+        function aggregateDataByTime(data, granularity) {
+            if (data.length === 0) return [];
+            
+            // Define time buckets in milliseconds
+            const buckets = {
+                '1min': 60 * 1000,
+                '5min': 5 * 60 * 1000,
+                '15min': 15 * 60 * 1000,
+                '30min': 30 * 60 * 1000,
+                '1hour': 60 * 60 * 1000
+            };
+            
+            const bucketSize = buckets[granularity] || buckets['5min'];
+            const result = [];
+            const bucketMap = {};
+            
+            // Group data into time buckets
+            data.forEach(point => {
+                // Round timestamp to nearest bucket
+                const bucketTime = new Date(Math.floor(point.timestamp.getTime() / bucketSize) * bucketSize);
+                const bucketKey = bucketTime.getTime();
+                
+                if (!bucketMap[bucketKey]) {
+                    bucketMap[bucketKey] = {
+                        timestamp: bucketTime,
+                        values: [],
+                        count: 0
+                    };
+                }
+                
+                bucketMap[bucketKey].values.push(point.value);
+                bucketMap[bucketKey].count++;
+            });
+            
+            // Calculate average for each bucket
+            Object.values(bucketMap).forEach(bucket => {
+                const sum = bucket.values.reduce((a, b) => a + b, 0);
+                result.push({
+                    timestamp: bucket.timestamp,
+                    value: sum / bucket.count
+                });
+            });
+            
+            // Sort by timestamp
+            return result.sort((a, b) => a.timestamp - b.timestamp);
+        }
+        
+        // Function to determine appropriate time unit based on granularity
+        function getTimeUnit(granularity) {
+            switch (granularity) {
+                case '1min':
+                case '5min':
+                case '15min':
+                case '30min':
+                    return 'minute';
+                case '1hour':
+                    return 'hour';
+                default:
+                    return 'minute';
+            }
+        }
+        
+        // Generate a random color for chart lines
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+        
+        // Update the data table
+        function updateTable(data) {
+            const tableBody = document.getElementById('dataTable');
+            tableBody.innerHTML = '';
+            
+            // Sort data by timestamp (newest first)
+            data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            // Take only the most recent 100 entries
+            const recentData = data.slice(0, 100);
+            
+            recentData.forEach(item => {
+                const row = document.createElement('tr');
+                
+                // Format the timestamp
+                const timestamp = new Date(item.timestamp);
+                const formattedTime = timestamp.toLocaleString();
+                
+                row.innerHTML = `
+                    <td>${formattedTime}</td>
+                    <td>${item.device_id}</td>
+                    <td>${item.sensor_type}</td>
+                    <td>${item.value}</td>
+                    <td>${item.unit}</td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        }
+        
+        // Update the statistics cards
+        async function updateStats(stats) {
+            const container = document.getElementById('statsContainer');
+            container.innerHTML = '';
+            
+            if (stats.length === 0) {
+                container.innerHTML = '<div class="p-3 text-center text-muted">No statistics available</div>';
+                return;
+            }
+            
+            // Get unique list of devices from stats
+            const devices = [...new Set(stats.map(stat => stat.device_id))];
+            
+            // Fetch all possible sensor types from the API
+            let allSensorTypes = [];
+            try {
+                const response = await fetch('/api/sensor_types');
+                allSensorTypes = await response.json();
+                allSensorTypes.sort(); // Sort alphabetically
+            } catch (error) {
+                console.error('Error fetching sensor types:', error);
+                // Fallback to sensor types from stats if API call fails
+                allSensorTypes = [...new Set(stats.map(stat => stat.sensor_type))].sort();
+            }
+            
+            // Create a lookup map for quick access to stats
+            const statsMap = {};
+            stats.forEach(stat => {
+                if (!statsMap[stat.device_id]) {
+                    statsMap[stat.device_id] = {};
+                }
+                statsMap[stat.device_id][stat.sensor_type] = stat;
+            });
+            
+            // For each sensor type, create cards for all devices
+            allSensorTypes.forEach(sensorType => {
+                devices.forEach(deviceId => {
+                    const stat = statsMap[deviceId]?.[sensorType];
+                    const card = document.createElement('div');
+                    card.className = 'card stats-card mx-2 mt-2';
+                    
+                    if (stat) {
+                        // Device collects this sensor type
+                        card.innerHTML = `
+                            <div class="card-body py-2 px-3">
+                                <h6 class="card-title d-flex justify-content-between mb-2">
+                                    <span>${deviceId}</span>
+                                    <small class="text-muted">${sensorType}</small>
+                                </h6>
+                                <div class="row g-2">
+                                    <div class="col-4">
+                                        <div class="border-end">
+                                            <small class="text-muted d-block">Min</small>
+                                            <strong>${stat.min.toFixed(2)}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="border-end">
+                                            <small class="text-muted d-block">Avg</small>
+                                            <strong>${stat.avg.toFixed(2)}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div>
+                                            <small class="text-muted d-block">Max</small>
+                                            <strong>${stat.max.toFixed(2)}</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-1">
+                                    <small class="text-muted">Readings: ${stat.count}</small>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Device doesn't collect this sensor type or no current data
+                        card.innerHTML = `
+                            <div class="card-body py-2 px-3">
+                                <h6 class="card-title d-flex justify-content-between mb-2">
+                                    <span>${deviceId}</span>
+                                    <small class="text-muted">${sensorType}</small>
+                                </h6>
+                                <div class="text-center text-muted py-2">
+                                    <em>No data available</em>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    container.appendChild(card);
+                });
+            });
+        }
+        
+        // Debug functionality
+        document.getElementById('toggleDebugBtn').addEventListener('click', function() {
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.style.display = debugInfo.style.display === 'none' ? 'block' : 'none';
+        });
+        
+        function updateDebugInfo(data) {
+            const debugOutput = document.getElementById('debugOutput');
+            debugOutput.textContent = JSON.stringify({
+                dataPoints: data.length,
+                timeRange: document.getElementById('timeRange').value + ' hours',
+                lastRefresh: new Date().toLocaleString(),
+                deviceFilter: document.getElementById('deviceSelect').value || 'All',
+                sensorFilter: document.getElementById('sensorSelect').value || 'All'
+            }, null, 2);
+        }
+    </script>
+</body>
+</html> 
