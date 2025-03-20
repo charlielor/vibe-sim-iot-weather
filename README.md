@@ -13,9 +13,13 @@ vibe programming exercise for iot weather collection simulation
 
 5. `uv sync`
 
-6a. `python scripts/run_web_app.py` and go to 127.0.0.1:5000 for ui
+6. `uv pip install -e .`
 
-6b. `python scripts/run_multi_device.py` to generate fake data from a number of devices to a persistent duckdb store called `iot_data.duckdb`
+## to run web ui
+`python scripts/run_web_app.py` and go to 127.0.0.1:5000 for ui
+
+## to run generation of fake data
+`python scripts/run_multi_device.py` to generate fake data from a number of devices to a persistent duckdb store called `iot_data.duckdb`
 
 
 # thoughts
